@@ -138,7 +138,7 @@ struct PopulationInfo
     int numcromo;
 };
 
-void readFile(std::string fichPed, std::string fichMap, char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
+void readFile_ped(std::string fichinput1, std::string fichinput2, char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
 {
     /*
      * Takes as input the file name and a pointer to the population
@@ -153,10 +153,10 @@ void readFile(std::string fichPed, std::string fichMap, char (&population)[MAXIN
 
     // READING .ped DATA:
     std::ifstream entrada;
-    entrada.open(fichPed, std::ios::in); // Bucle de lectura del fichero ped
+    entrada.open(fichinput1, std::ios::in); // Bucle de lectura del fichero ped
     if (!entrada.good())
     {
-        std::cerr << "Could not open \"" << fichPed << "\". Does the file exist?" << std::endl;
+        std::cerr << "Could not open \"" << fichinput1 << "\". Does the file exist?" << std::endl;
         exit(EXIT_FAILURE);
     }
     while (std::getline(entrada,line)){
@@ -170,7 +170,10 @@ void readFile(std::string fichPed, std::string fichMap, char (&population)[MAXIN
         while ((posi < longi) && (conta < 6)){
             posi2=posi;
             posi=int(line.find_first_of(" \t",posi2));
-            if (posi < 0) {break;}
+            if (posi < 0) {
+                std::cerr << "Line too short in ped file" << std::endl;
+                exit(EXIT_FAILURE);
+            }
             ++posi;
             ++conta;
         }
@@ -215,7 +218,7 @@ void readFile(std::string fichPed, std::string fichMap, char (&population)[MAXIN
                 ++popInfo.numLoci;
                 if (popInfo.numLoci >= MAXLOCI) {
                     std::cerr<<"Reached max number of loci (" << MAXLOCI << ")" << std::endl;
-                    break;
+                    exit(EXIT_FAILURE);
                 }
             }
 
@@ -240,7 +243,7 @@ void readFile(std::string fichPed, std::string fichMap, char (&population)[MAXIN
     // READING .map DATA:
     flagmapfile = false;
     ncromos=0;
-    entrada.open(fichMap, std::ios::in); // Bucle de lectura del fichero map
+    entrada.open(fichinput2, std::ios::in); // Bucle de lectura del fichero map
     if (entrada.good()){
     flagmapfile = true;
     }
@@ -296,15 +299,317 @@ void readFile(std::string fichPed, std::string fichMap, char (&population)[MAXIN
 
 }
 
+
+void readFile_tped(std::string fichinput1,char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
+{
+    /*
+     * Takes as input the file name and a pointer to the population
+     * matrix and returns the number of individuals in the file
+     */
+	char base1[1],base2[1];
+    int contaIndBase = 0;
+    int conta=0, posi=0, posi2=0, longi=0,i;
+    std::string line;
+    std::string cromocod;
+    std::string cromocodback = "laksjhbqne";
+
+    // READING .tped DATA:
+    std::ifstream entrada;
+    entrada.open(fichinput1, std::ios::in); // Bucle de lectura del fichero tped
+    if (!entrada.good())
+    {
+        std::cerr << "Could not open \"" << fichinput1 << "\". Does the file exist?" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    flagmapfile=false;
+    ncromos=0;
+    int contalines=0;
+    popInfo.numLoci=0;
+    while (std::getline(entrada,line)){
+        longi=int(line.length());
+        if (longi<12){
+            std::cerr << "Line too short in tped file" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        conta=0;
+        posi=0;
+        // chr name
+        posi2=posi;
+        posi=int(line.find_first_of(" \t",posi2));
+        if (posi < 0) {
+            std::cerr << "Line too short in tped file" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        cromocod = line.substr(0, posi);
+        if (cromocod != cromocodback){
+            cromocodback = cromocod;
+            rangocromo[ncromos] = contalines;
+            ++ ncromos;
+        }
+        cromo[contalines] = ncromos;
+
+        ++contalines; // para crom
+
+        ++posi;
+        ++conta;
+
+        while ((posi < longi) && (conta < 4)){
+            posi2=posi;
+            posi=int(line.find_first_of(" \t",posi2));
+            if (posi < 0) {
+                std::cerr << "Line too short in tped file" << std::endl;
+                exit(EXIT_FAILURE);
+           }
+            ++posi;
+            ++conta;
+        }
+        if (conta==4){
+            popInfo.numIndividuals = 0;
+            while(posi < longi) { // asigna genot.
+                base1[0]=line.at(posi);
+                posi2=posi;
+                posi=int(line.find_first_of(" \t",posi2));
+                if (posi < 0) {break;}
+                ++posi;
+                base2[0]=line.at(posi);
+                if ((base1[0]!='0') && (base2[0]!='0')){
+                    if (base[popInfo.numLoci] == '\0'){
+                        base[popInfo.numLoci] = base1[0];
+                    }
+
+                    // 0:homo ref, 1:het, 2:homo noref
+                    if (base1[0] == base2[0])
+                    {
+                        if (base1[0] == base[popInfo.numLoci])
+                        {
+                            population[popInfo.numIndividuals][popInfo.numLoci] = 0;
+                        }
+                        else
+                        {
+                            population[popInfo.numIndividuals][popInfo.numLoci] = 2;
+                        }
+                    }
+                    else
+                    {
+                        population[popInfo.numIndividuals][popInfo.numLoci] = 1;
+                    }
+                }
+                else{
+                    population[popInfo.numIndividuals][popInfo.numLoci] = 9;// '9' = Genotipo sin asignar
+                }
+                posi2=posi;
+                posi=int(line.find_first_of(" \t",posi2));
+                if (posi < 0) {posi=longi;}
+                ++posi;
+                popInfo.numIndividuals++;
+                if (popInfo.numIndividuals > MAXIND){
+                    std::cerr << "Reached limit of sample size (" << MAXIND <<")" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+
+            }
+
+            if (popInfo.numLoci == 0){
+                contaIndBase = popInfo.numIndividuals;
+            }
+
+            if (popInfo.numIndividuals != contaIndBase){
+                std::cerr << "Some SNP in the sample are not represented in all the individuals" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+
+            ++popInfo.numLoci;
+            if (popInfo.numLoci >= MAXLOCI) {
+                std::cerr<<"Reached max number of loci (" << MAXLOCI << ")" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+
+        }
+    }
+    if (ncromos>1){
+        flagmapfile=true;
+    }
+    if (flagmapfile){
+        popInfo.numcromo = ncromos;
+        // posicMacu += posicM-posicMant;
+        unomenoschrprop=0;
+        for (i=0;i<ncromos;++i){
+            chrnum[i]=rangocromo[i+1]-rangocromo[i]; // número de marcadores en cada cromosoma
+            chrprop[i]=chrnum[i]/contalines; // Proporción de SNPs en cada cromosoma
+            chrprop[i]*=chrprop[i]; //ahora su cuadrado
+            unomenoschrprop+=chrprop[i];
+        }
+        unomenoschrprop=1-unomenoschrprop;
+    }
+
+    entrada.close();
+}
+
+
+
+void readFile_vcf(std::string fichinput1, char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
+{
+    /*
+     * Takes as input the file name and a pointer to the population
+     * matrix and returns the number of individuals in the file
+     */
+	char base1[1],base2[1];
+    int contaIndBase = 0;
+    int conta=0, posi=0, posi2=0, longi=0,i;
+    std::string line;
+    std::string cromocod;
+    std::string cromocodback = "laksjhbqne";
+
+    // READING .tped DATA:
+    std::ifstream entrada;
+    entrada.open(fichinput1, std::ios::in); // Bucle de lectura del fichero tped
+    if (!entrada.good())
+    {
+        std::cerr << "Could not open \"" << fichinput1 << "\". Does the file exist?" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    flagmapfile=false;
+    ncromos=0;
+    int contalines=0;
+    popInfo.numLoci=0;
+    while (std::getline(entrada,line)){
+        if (line.at(0) != '#'){
+            longi=int(line.length());
+            if (longi<12){
+                std::cerr << "Line too short in tped file" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            conta=0;
+            posi=0;
+            // chr name
+            posi2=posi;
+            posi=int(line.find_first_of("\t",posi2));
+            if (posi < 0) {
+                std::cerr << "Line too short in tped file" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            cromocod = line.substr(0, posi);
+            if (cromocod != cromocodback){
+                cromocodback = cromocod;
+                rangocromo[ncromos] = contalines;
+                ++ ncromos;
+            }
+            cromo[contalines] = ncromos;
+
+            ++contalines; // para crom
+
+            ++posi;
+            ++conta;
+
+            while ((posi < longi) && (conta < 9)){
+                posi2=posi;
+                posi=int(line.find_first_of("\t",posi2));
+                if (posi < 0) {
+                    std::cerr << "Line too short in tped file" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                ++posi;
+                ++conta;
+            }
+            if (conta==9){
+                popInfo.numIndividuals = 0;
+                while(posi < longi) { // asigna genot.
+                    base1[0]=line.at(posi);
+                    posi2=posi;
+                    posi=int(line.find_first_of("/|",posi2));
+                    if (posi < 0) {break;}
+                    ++posi;
+                    base2[0]=line.at(posi);
+                    if ((base1[0]!='.') && (base2[0]!='.')){
+                        if (base[popInfo.numLoci] == '\0'){
+                            base[popInfo.numLoci] = base1[0];
+                        }
+
+                        // 0:homo ref, 1:het, 2:homo noref
+                        if (base1[0] == base2[0])
+                        {
+                            if (base1[0] == base[popInfo.numLoci])
+                            {
+                                population[popInfo.numIndividuals][popInfo.numLoci] = 0;
+                            }
+                            else
+                            {
+                                population[popInfo.numIndividuals][popInfo.numLoci] = 2;
+                            }
+                        }
+                        else
+                        {
+                            population[popInfo.numIndividuals][popInfo.numLoci] = 1;
+                        }
+                    }
+                    else{
+                        population[popInfo.numIndividuals][popInfo.numLoci] = 9;// '9' = Genotipo sin asignar
+                    }
+                    posi2=posi;
+                    posi=int(line.find_first_of("\t",posi2));
+                    if (posi < 0) {posi=longi;}
+                    ++posi;
+
+                    popInfo.numIndividuals++;
+                    if (popInfo.numIndividuals > MAXIND){
+                        std::cerr << "Reached limit of sample size (" << MAXIND <<")" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
+                }
+
+                if (popInfo.numLoci == 0){
+                    contaIndBase = popInfo.numIndividuals;
+                }
+
+                if (popInfo.numIndividuals != contaIndBase){
+                    std::cerr << "Some SNP in the sample are not represented in all the individuals" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+
+                ++popInfo.numLoci;
+                if (popInfo.numLoci >= MAXLOCI) {
+                    std::cerr<<"Reached max number of loci (" << MAXLOCI << ")" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+
+            }
+        }
+    }
+    if (ncromos>1){
+        flagmapfile=true;
+    }
+    if (flagmapfile){
+        popInfo.numcromo = ncromos;
+        // posicMacu += posicM-posicMant;
+        unomenoschrprop=0;
+        for (i=0;i<ncromos;++i){
+            chrnum[i]=rangocromo[i+1]-rangocromo[i]; // número de marcadores en cada cromosoma
+            chrprop[i]=chrnum[i]/contalines; // Proporción de SNPs en cada cromosoma
+            chrprop[i]*=chrprop[i]; //ahora su cuadrado
+            unomenoschrprop+=chrprop[i];
+        }
+        unomenoschrprop=1-unomenoschrprop;
+    }
+
+    entrada.close();
+
+}
+
+
+
+
+
 void printHelp(char * appName) 
 {
     fprintf(stderr,
         "currentNe - Current Ne estimator (v1.0 - Jan 2023)\n"
         "Authors: Enrique Santiago - Carlos Köpke\n"
         "\n"
-        "USAGE: %s [OPTIONS] <file_name> <number_of_chromosomes>\n"
-        "         Where file_name is the name of the data files in ped format (PLINK)\n"
-        "             without the extension .ped.\n"
+        "USAGE: %s [OPTIONS] <file_name_with_extension> <number_of_chromosomes>\n"
+        "         Where file_name is the name of the data file in vcf, ped or tped\n"
+        "             formats (include the corresponding extension vcf, ped or tped\n"
+        "             in the filename).\n"
         "         If a .map file is present in the same directory, an estimate based\n"
         "             on loci in diferent chromosomes will also be calculated.\n\n"
         " OPTIONS:\n"
@@ -324,6 +629,8 @@ void printHelp(char * appName)
         "         full siblings in the population will be estimated along with Ne.\n"
         "         -BY DEFAULT, i.e. if the modifier is not used, the average number\n"
         "         of full siblings k will be estimated from the input data.\n"
+        "   -o    Specifies the output filename. If not specified, the output \n"
+        "         filename is built from the name of the input file.\n"
         "   -t    Number of threads (default: %d)\n"
         "   -q    Run quietly. Only prints out Ne estimation\n"
         "   -p    Print the analysis to stdout. If not specified a file will be created\n"
@@ -333,22 +640,22 @@ void printHelp(char * appName)
         "   - Random mating and 20 chromosomes (equivalent to a genome of 20 Morgans),\n" 
         "     assuming that full siblings are no more frequent than expected  under\n" 
         "     random pairing (each offspring from a new random pairing).\n" 
-        "         %s -k 0 file 20\n" 
+        "         %s -k 0 filename 20\n" 
         "   - Same as before but only a random subsample of 10000 SNPs\n" 
         "     will be analysed:\n" 
-        "         %s -k 0 -s 100000 file 20\n" 
+        "         %s -k 0 -s 100000 filename 20\n" 
         "   - Same as before but full siblings could be more frequent than expected\n" 
         "     under random pairing. Full siblings will be identified from the \n" 
         "     genotyping data in the ped file:\n" 
-        "         %s -s 100000 file 20\n" 
+        "         %s -s 100000 filename 20\n" 
         "   - Two full siblings per individual (k = 2) IN THE POPULATION:\n"
-        "         %s -k 2 file 20\n"
-        "   - An 80%% of lifetime monogamy in the population:\n"
-        "         %s -k 1.6 file 20\n"
+        "         %s -k 2 filename 20\n"
+        "   - An 80%% of lifetime monogamy in the population. Output filename specified:\n"
+        "         %s -k 1.6 -o SS81out filename 20\n"
         "     (with a monogamy rate m = 0.80, the expected number of full\n"
         "     siblings that a random individual has is k = 2*m = 1.6)\n"
         "   - If 0.2 full siblings per individual are OBSERVED IN THE SAMPLE:\n"
-        "         %s -k -0.2 file 20\n"
+        "         %s -k -0.2 filename 20\n"
         "     (NOTE the MINUS SIGN before the number of full sibling 0.2)\n\n",
         appName,
         omp_get_max_threads(),
@@ -374,9 +681,10 @@ int main(int argc, char * argv[]) {
     std::uniform_real_distribution<> uniforme01(0.0, 1.0);
     for (i=0;i<MAXIND;++i){validind[i]=true;}
     params.K=0;
+    std::string fichspecified = "";
     for(;;)
     {
-        switch(getopt(argc, argv, "hs:k:t:qpv"))
+        switch(getopt(argc, argv, "hs:k:o:t:qpv"))
         {
             case '?':
             case 'h':
@@ -403,6 +711,9 @@ int main(int argc, char * argv[]) {
 					params.flagks=false;
                 } 
                 continue;
+            case 'o':
+                fichspecified =  optarg;
+                continue;
             case 't':
                 params.numThreads = std::atoi(optarg);
                 continue;
@@ -421,28 +732,31 @@ int main(int argc, char * argv[]) {
         break;
     }
     std::string fich = "";
-    std::string fichped = "";
-    std::string fichmap = "";
+    std::string extension = "";
+    std::string prefijo = "";
+    std::string fichinput1 = "";
+    std::string fichinput2 = "";
     Ncrom = 0;
     if (optind < argc)
     {
-        fich = argv[optind];
-        optind++;
-        if (optind < argc)
-        {
-            Ncrom = std::atof(argv[optind]);
-            if (Ncrom<=0){
-                std::cerr << "Number of chromosomes is 0" << std::endl;
-                return -1;
+            fich = argv[optind];
+
+            optind++;
+            if (optind < argc)
+            {
+                Ncrom = std::atof(argv[optind]);
+                if (Ncrom<=0){
+                    std::cerr << "Number of chromosomes is 0" << std::endl;
+                    return -1;
+                }
+                else{
+                    flaggenomesize=true;
+                }
             }
             else{
-                flaggenomesize=true;
+                std::cerr << "Number of chromosomes not specified" << std::endl;
+                return -1;
             }
-        }
-        else{
-            std::cerr << "Number of chromosomes not specified" << std::endl;
-            return -1;
-        }
     }
 
     if (fich == "")
@@ -451,8 +765,37 @@ int main(int argc, char * argv[]) {
         return -1;
     }
 
-    fichped = fich + ".ped";
-    fichmap = fich + ".map";
+    fichinput1 = fich;
+    std::size_t punto = fich.find(".",0);
+    if (punto==std::string::npos){
+            std::cerr << "The filename has no extension" << std::endl;
+            return -1;             
+    }
+    std::size_t punto2=0;
+    while (punto2!=std::string::npos){
+        punto2=fich.find(".",punto+1);
+        if (punto2!=std::string::npos){
+            punto=punto2;
+        }
+        else{
+            break;
+        }
+    }
+    prefijo.assign(fich,0,punto);
+    extension.assign(fich,punto+1,fich.length()-punto-1);
+    if (prefijo==""){
+            std::cerr << "Missing data filename" << std::endl;
+            return -1;             
+    }
+    if ((extension!="vcf") && (extension!="ped") && (extension!="tped")){
+            std::cerr << "Missing data filename extension. It must be vcf, ped or tped" << std::endl;
+            return -1;             
+    }
+
+    if (extension=="ped"){
+        fichinput2=prefijo+".map";
+    }
+
     std::string fichProgress = fich + "_currentNe_progress.tmp";
     params.progress.InitTotalTasks(1, fichProgress.c_str());
 
@@ -478,22 +821,27 @@ int main(int argc, char * argv[]) {
         .numLoci=0
     };
 
-    readFile(fichped, fichmap, indi, popInfo);
-    // if (flagmapfile){
-    //     if (ncromos != Ncrom){
-    //         std::cerr << "The number of chromosomes in map file is different from the one given in the command line" << std::endl;
-    //         return -1;
-    //     }
-    // }
-
+    if (extension=="ped"){
+        fichinput1 = prefijo + ".ped"; 
+        fichinput2 = prefijo + ".map";
+        readFile_ped(fichinput1, fichinput2, indi, popInfo);
+    }
+    else if (extension=="tped"){
+        fichinput1 = prefijo + ".tped"; 
+        readFile_tped(fichinput1, indi, popInfo);
+    }
+    else if (extension=="vcf"){
+        fichinput1 = prefijo + ".vcf"; 
+        readFile_vcf(fichinput1, indi, popInfo);
+    }
 
     double tProcessFile = (omp_get_wtime() - tini);
     if (!params.quiet){
-        if (flagmapfile){
-            std::cout << " Reading " << fichped  << " and "<< fichmap << " took " << std::fixed << std::setprecision(2) << tProcessFile << " sec" << std::endl;
+        if ((flagmapfile) && (extension=="ped")){
+            std::cout << " Reading " << fichinput1  << " and "<< fichinput2 << " took " << std::fixed << std::setprecision(2) << tProcessFile << " sec" << std::endl;
         }
         else{
-            std::cout << " Reading " << fichped << " took " << std::fixed << std::setprecision(2) << tProcessFile << " sec" << std::endl;
+            std::cout << " Reading " << fichinput1 << " took " << std::fixed << std::setprecision(2) << tProcessFile << " sec" << std::endl;
         }
     }
     if (!params.quiet)
@@ -934,7 +1282,7 @@ int main(int argc, char * argv[]) {
         salida << ncromos<<"\n";
     }
     else{
-        salida << "There is not .map file:\n";
+        salida << "There is not chromosome information:\n";
     }
     salida << "# Genome size in Morgans:\n";
     salida << std::fixed << std::setprecision(2);
@@ -1189,7 +1537,13 @@ int main(int argc, char * argv[]) {
             std::cout << output << std::endl;
         }
         else{
-            std::string fichsal= fich +"_currentNe_OUTPUT.txt";
+            std::string fichsal="";
+            if (fichspecified==""){
+                fichsal= prefijo +"_currentNe_OUTPUT.txt";
+            }
+            else{
+                fichsal= fichspecified;
+            }
             std::ofstream outputFile;
             outputFile.open(fichsal);
             outputFile << salida.str();
@@ -1429,4 +1783,3 @@ double CalculaIntervalo_soloLD(){
     }
     return log10_Nest;
 }
-
