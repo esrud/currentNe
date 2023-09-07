@@ -35,12 +35,16 @@ Note that increasing those values will increase the free RAM requirements.
 currentNe - Current Ne estimator (v1.0 - Jan 2023)
 Authors: Enrique Santiago - Carlos Köpke
 
-USAGE: ./currentNe [OPTIONS] <file_name_with_extension> <number_of_chromosomes>
-         Where file_name is the name of the data file in vcf, ped or tped
-             formats (include the corresponding extension vcf, ped or tped
-             in the filename).
-         If a .map file is present in the same directory, an estimate based
-             on loci in diferent chromosomes will also be calculated.
+USAGE: ./currentNe [OPTIONS] <filename_with_extension> <number_of_chromosomes>
+         where filename is the name of the data file in vcf, ped or tped
+             format. The filename must include the name extension
+             .vcf, .ped or .tped according to its format.
+         If the assignments of SNPs to chromosomes are available in the
+             input file, an additional estimate based only on pairs of SNPs
+             located on different chromosomes will also be calculated.
+             If the ped format is used, this additional estimate will be
+             made if the corresponding map file is available in the same
+             directory as the ped file.
 
  OPTIONS:
    -h    Print out this manual.
