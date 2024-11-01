@@ -45,6 +45,7 @@ char indi[MAXIND][MAXLOCI]={'\0'}; //** Genotipos dip 0:homo, 1:het, 2:homo
 char base[MAXLOCI]={'\0'}; // Contiene las bases de referencia de cada locus
 double mapposi[MAXLOCI]={0};// posiciones geneticas en cM del .map
 double mapdist[MAXDIST]={0}; // contiene la distribucion de los pares de distancias                                       
+double tacui = 0, tacuj = 0;
 char cromo[MAXLOCI]; // contiene el número de cromosoma de cada locus
 int rangocromo[MAXCROMO], ncromos;
 double frec[MAXLOCI], homo[MAXLOCI];
@@ -60,7 +61,8 @@ int *pj, *pi, *prefloc,*prefind,*pk,*pfinloc,*pfinind;
 int containd,contaloc,contaloc2,contalocbase,contaseg,eneind,eneloc,enelocsolicitado;
 int enecrom,n_sample,n_SNPs,n_threads,ff,gg,ncrom_sample_int,imindist,imaxdist;
 double acuD2,acuW,acun,acupq,acuPp2,acur2, acuD205,acuW05, acur205, acun05;
-double n,d2s,d2s05,L,fs,fp,backfp,Ch,ele,Ne,Neant,genomesize;
+double acuD2link, acuWlink, acur2link, acunlink, effndatalink = 0;
+double n,d2s,d2s05, d2slink,L,fs,fp,backfp,Ch,ele,Ne,Neant,genomesize;
 double Ne_integral_crom,Ne_integral_tot,Ne_integral_totcrom, Ne_05,cM, Ncrom;
 double Ne_nohets,Ne_hets,effndata=0,effndata05=0,obsndata=0,propmiss,n_SNP_pairs,effeneind,effeneind_h;
 double acuParent=0, acuHet=0,Het_med=0, Het_esp=0,Het_var=0,Het_DT,Het_sesg=0;
@@ -73,8 +75,11 @@ long int x_contapares[MAXLOCI]={0};
 double xD[MAXLOCI]={0},xW[MAXLOCI]={0},xr2[MAXLOCI]={0};
 long int x_containdX05[MAXLOCI]={0};
 long int x_contapares05[MAXLOCI]={0};
+long int x_containdXlink[MAXLOCI] = {0};
+long int x_contapareslink[MAXLOCI] = {0};
 double xD05[MAXLOCI]={0},xW05[MAXLOCI]={0},xr205[MAXLOCI]={0};
-bool flagmapfile=false, flaggenomesize=false, flaggeneticmap=false;
+double xDlink[MAXLOCI] = {0}, xWlink[MAXLOCI] = {0}, xr2link[MAXLOCI] = {0};
+bool flag_chr=false, flaggeneticmap=false;
 bool flagcMMb=false, flagconvergence=true;
 int contaelim=0,enefuerzaajuste=1;
 int nparhermanos=0,npadrehijo=0,counthethet=0,counthethomo=0,counthomohomo=0,sumahethomo,countnopadre;
@@ -86,6 +91,19 @@ double d2p=0,d2p05=0;
 int fciclo;
 bool flagnoestimaks=false;
 
+
+double posiCM[MAXLOCI] = {0};       // posiciones geneticas en cM del .map
+double posiBP[MAXLOCI] = {0};       // posiciones geneticas en cM del .map
+double AA,BB,CC,DD,EE, c, c2, c12,m12,m22;
+bool flag_r=false;
+bool flag_z=false;
+bool flag_Gs=false;
+bool flag_cM=false;
+bool flag_Mb=false;
+bool haygenotipos=false;
+double Mtot=0, Mbtot=0;
+double maxdistance, increMorgans, sumadist=0;
+int maxdistanceindx;
 
 	
 // Variables privadas para paralelizacion:
@@ -108,9 +126,11 @@ struct AppParams {
     double ks;
     bool flagks;
     bool flagnok;
+    double miss;
     bool quiet;
     bool printToStdOut;
     bool verbose;
+    double z;
     ProgressStatus progress;
 };
 
@@ -125,9 +145,11 @@ struct AppParams params =
     .ks=0,
     .flagks=false,
     .flagnok=true,
+    .miss = 0.2,
     .quiet = false,
     .printToStdOut = false,
     .verbose = false,
+    .z = 0,
     .progress = ProgressStatus()
 };
 
@@ -138,18 +160,21 @@ struct PopulationInfo
     int numcromo;
 };
 
-void readFile_ped(std::string fichinput1, std::string fichinput2, char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
+void readFile_ped(std::string fichinput1, std::string fichinput2, char (&population)[MAXIND][MAXLOCI], PopulationInfo(&popInfo))
 {
     /*
      * Takes as input the file name and a pointer to the population
      * matrix and returns the number of individuals in the file
      */
-	char base1[1],base2[1];
-    int contaLociBase = 0;
-    int conta=0, posi=0, posi2=0, longi=0,i;
+    char base1[1], base2[1];
+    int contaLociBase = 0, nline = 0;
+    int conta = 0, posi = 0, posi2 = 0, longi = 0, i;
     std::string line;
     std::string cromocod;
     std::string cromocodback = "laksjhbqne";
+    std::string str_plink = "AGCTNagctn0123456789";
+    std::string str_base = "";
+    bool rightletter;
 
     // READING .ped DATA:
     std::ifstream entrada;
@@ -159,36 +184,72 @@ void readFile_ped(std::string fichinput1, std::string fichinput2, char (&populat
         std::cerr << "Could not open \"" << fichinput1 << "\". Does the file exist?" << std::endl;
         exit(EXIT_FAILURE);
     }
-    while (std::getline(entrada,line)){
-        longi=int(line.length());
-        if (longi<12){
-            std::cerr << "Line too short in ped file" << std::endl;
+    while (std::getline(entrada, line))
+    {
+        ++nline;
+        longi = int(line.length());
+        if (longi < 12)
+        {
+            std::cerr << "Line "<<nline<<" too short in ped file" << std::endl;
             exit(EXIT_FAILURE);
         }
-        conta=0;
-        posi=0;
-        while ((posi < longi) && (conta < 6)){
-            posi2=posi;
-            posi=int(line.find_first_of(" \t",posi2));
-            if (posi < 0) {
-                std::cerr << "Line too short in ped file" << std::endl;
+        conta = 0;
+        posi = 0;
+        while ((posi < longi) && (conta < 6))
+        {
+            posi2 = posi;
+            posi = int(line.find_first_of(" \t", posi2));
+            if (posi < 0)
+            {
+                std::cerr << "Line "<<nline<<" too short in ped file" << std::endl;
                 exit(EXIT_FAILURE);
             }
             ++posi;
             ++conta;
         }
-        if (conta==6){
+        if (conta == 6)
+        {
             popInfo.numLoci = 0;
-            while(posi < longi) { // asigna genot.
-                base1[0]=line.at(posi);
-                posi2=posi;
-                posi=int(line.find_first_of(" \t",posi2));
-                if (posi < 0) {break;}
+            while (posi < longi)
+            { // asigna genot.
+                base1[0] = line.at(posi);
+                posi2 = posi;
+                posi = int(line.find_first_of(" \t", posi2));
+                if (posi < 0)
+                {
+                    break;
+                }
                 ++posi;
-                base2[0]=line.at(posi);
-                if ((base1[0]!='0') && (base2[0]!='0')){
-                    if (base[popInfo.numLoci] == '\0'){
+                base2[0] = line.at(posi);
+                rightletter = true;
+                str_base = base1[0];
+                if (str_plink.find(str_base) == str_plink.npos)
+                {
+                    rightletter = false;
+                }
+                str_base = base2[0];
+                if (str_plink.find(str_base) == str_plink.npos)
+                {
+                    rightletter = false;
+                }
+                if (!rightletter)
+                {
+                    std::cerr << "Wrong allele in line " << nline << " of ped file (maybe also in other lines). Only bases A, G, C, T and N (case-insensitive) and numbers from 0 to 9 are allowed." << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                if ((base1[0] != '0') && (base2[0] != '0') && (base1[0] != 'N') && (base2[0] != 'N') && (base1[0] != 'n') && (base2[0] != 'n'))
+                {
+                    if (base[popInfo.numLoci] == '\0')
+                    {
                         base[popInfo.numLoci] = base1[0];
+                    }
+                    if (base1[0] != base[popInfo.numLoci])
+                    {
+                        base1[0] = 'X';
+                    }
+                    if (base2[0] != base[popInfo.numLoci])
+                    {
+                        base2[0] = 'X';
                     }
 
                     // 0:homo ref, 1:het, 2:homo noref
@@ -208,32 +269,40 @@ void readFile_ped(std::string fichinput1, std::string fichinput2, char (&populat
                         population[popInfo.numIndividuals][popInfo.numLoci] = 1;
                     }
                 }
-                else{
-                    population[popInfo.numIndividuals][popInfo.numLoci] = 9;// '9' = Genotipo sin asignar
+                else
+                {
+                    population[popInfo.numIndividuals][popInfo.numLoci] = 9; // '9' = Genotipo sin asignar
                 }
-                posi2=posi;
-                posi=int(line.find_first_of(" \t",posi2));
-                if (posi < 0) {posi=longi;}
+                posi2 = posi;
+                posi = int(line.find_first_of(" \t", posi2));
+                if (posi < 0)
+                {
+                    posi = longi;
+                }
                 ++posi;
                 ++popInfo.numLoci;
-                if (popInfo.numLoci >= MAXLOCI) {
-                    std::cerr<<"Reached max number of loci (" << MAXLOCI << ")" << std::endl;
+                if (popInfo.numLoci >= MAXLOCI)
+                {
+                    std::cerr << "Reached max number of loci (" << MAXLOCI << ")" << std::endl;
                     exit(EXIT_FAILURE);
                 }
             }
 
-            if (popInfo.numIndividuals == 0){
+            if (popInfo.numIndividuals == 0)
+            {
                 contaLociBase = popInfo.numLoci;
             }
 
-            if (popInfo.numLoci != contaLociBase){
+            if (popInfo.numLoci != contaLociBase)
+            {
                 std::cerr << "Some genomes in the sample are of different sizes" << std::endl;
                 exit(EXIT_FAILURE);
             }
 
             popInfo.numIndividuals++;
-            if (popInfo.numIndividuals > MAXIND){
-                std::cerr << "Reached limit of sample size (" << MAXIND <<")" << std::endl;
+            if (popInfo.numIndividuals > MAXIND)
+            {
+                std::cerr << "Reached limit of sample size (" << MAXIND << ")" << std::endl;
                 exit(EXIT_FAILURE);
             }
         }
@@ -241,77 +310,136 @@ void readFile_ped(std::string fichinput1, std::string fichinput2, char (&populat
     entrada.close();
 
     // READING .map DATA:
-    flagmapfile = false;
-    ncromos=0;
+    flag_chr = false;
+    ncromos = 0;
     entrada.open(fichinput2, std::ios::in); // Bucle de lectura del fichero map
-    if (entrada.good()){
-    flagmapfile = true;
+    if (entrada.good())
+    {
+        flag_chr = true;
     }
-    if (flagmapfile){
-        int contalines=0;
-        while (std::getline(entrada,line)){
-            longi=int(line.length());
-            if (longi<5){
-                std::cerr << "Line too short in map file" << std::endl;
+    if (flag_chr)
+    {
+        int contalines = 0;
+        while (std::getline(entrada, line))
+        {
+            longi = int(line.length());
+            if (longi < 5)
+            {
+                std::cerr << "Line "<<contalines+1<<" too short in map file" << std::endl;
                 exit(EXIT_FAILURE);
             }
 
-            posi=int(line.find_first_of(" \t",0));
-            if (posi <= 0) {
+            posi = int(line.find_first_of(" \t", 0));
+            if (posi <= 0)
+            {
                 std::cerr << "Empty line in map file" << std::endl;
                 exit(EXIT_FAILURE);
             }
             cromocod = line.substr(0, posi);
-            if (cromocod != cromocodback){
+            if (cromocod != cromocodback)
+            {
                 cromocodback = cromocod;
                 rangocromo[ncromos] = contalines;
-                ++ ncromos;
+                ++ncromos;
             }
             cromo[contalines] = ncromos;
 
+            ++posi;  // Nombre del SNP que no se lee
+            posi2 = posi;
+            posi=static_cast<int>(line.find_first_of(" \t",posi2));
+            if (posi <= 0) {
+            std::cerr << "Error in map file (1)" << std::endl;
+            exit(EXIT_FAILURE);
+            }
+
+            ++posi;  // Localizacion cM
+            posi2 = posi;
+            posi=static_cast<int>(line.find_first_of(" \t",posi2));
+            if (posi <= 0) {
+            std::cerr << "Error in map file (2)" << std::endl;
+            exit(EXIT_FAILURE);
+            }
+            posiCM[contalines] = std::stod(line.substr(posi2, posi - posi2));
+            if (posiCM[contalines]>0){flag_cM=true;}
+            ++posi;
+
+            if (posi > longi) {  // Localizacion bp
+            std::cerr << "Error in map file (3)" << std::endl;
+            exit(EXIT_FAILURE);
+            }
+            posiBP[contalines] = std::stoi(line.substr(posi, longi - posi));
+            if (posiBP[contalines]>0){flag_Mb=true;}
 
             ++contalines;
         }
 
         rangocromo[ncromos] = contalines;
-        if (ncromos<2){
-            std::cerr << "There are not enough chromosomes in the map file" << std::endl;
-            exit(EXIT_FAILURE); 
+
+        if (ncromos < 2)
+        {
+            flag_chr = false;
         }
-        flaggeneticmap=false;
         entrada.close();
-        if (popInfo.numLoci != contalines){
+        if (popInfo.numLoci != contalines)
+        {
             std::cerr << "Different number of loci in ped and map files" << std::endl;
-            exit(EXIT_FAILURE); 
+            exit(EXIT_FAILURE);
         }
         popInfo.numcromo = ncromos;
-        // posicMacu += posicM-posicMant;
-        unomenoschrprop=0;
-        for (i=0;i<ncromos;++i){
-            chrnum[i]=rangocromo[i+1]-rangocromo[i]; // número de marcadores en cada cromosoma
-            chrprop[i]=chrnum[i]/contalines; // Proporción de SNPs en cada cromosoma
-            chrprop[i]*=chrprop[i]; //ahora su cuadrado
-            unomenoschrprop+=chrprop[i];
+
+        if (flag_cM){
+            Mtot = 0;
+            for (int conta = 0; conta < ncromos; ++conta) {
+                Mtot += posiCM[rangocromo[conta+1]-1]-posiCM[rangocromo[conta]];
+            }
+            Mtot /= 100.0;       // en Morgans
         }
-        unomenoschrprop=1-unomenoschrprop;
+
+        if (flag_Mb){
+            Mbtot = 0;
+            for (int conta = 0; conta < ncromos; ++conta) {
+                Mbtot += posiBP[rangocromo[conta+1]-1]-posiBP[rangocromo[conta]];
+            }
+            Mbtot /= 1000000.0;  // en megabases
+        }
+
+
+        if (flag_chr)
+        {
+            unomenoschrprop = 0;
+            if(!flag_Gs){genomesize=Mtot;}
+            for (i = 0; i < ncromos; ++i)
+            {
+                chrnum[i] = rangocromo[i + 1] - rangocromo[i]; // número de marcadores en cada cromosoma
+                chrprop[i] = chrnum[i] / contalines;           // Proporción de SNPs en cada cromosoma
+                if (flag_Gs){
+                    chrsize[i] = chrprop[i] * genomesize; // tamaño en Morgans
+                }
+                else if (flag_cM){
+                    chrsize[i] = (posiCM[rangocromo[i+1]-1]-posiCM[rangocromo[i]])/100; // tamaño en Morgans
+                }
+                unomenoschrprop += chrprop[i];
+            }
+            unomenoschrprop = 1 - unomenoschrprop;
+        }
     }
-
-
 }
 
-
-void readFile_tped(std::string fichinput1,char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
+void readFile_tped(std::string fichinput1, char (&population)[MAXIND][MAXLOCI], PopulationInfo(&popInfo))
 {
     /*
      * Takes as input the file name and a pointer to the population
      * matrix and returns the number of individuals in the file
      */
-	char base1[1],base2[1];
-    int contaIndBase = 0;
-    int conta=0, posi=0, posi2=0, longi=0,i;
+    char base1[1], base2[1];
+    int contaIndBase = 0, nline = 0;
+    int conta = 0, posi = 0, posi2 = 0, longi = 0, i;
     std::string line;
     std::string cromocod;
     std::string cromocodback = "laksjhbqne";
+    std::string str_plink = "AGCTNagctn0123456789";
+    std::string str_base = "";
+    bool rightletter;
 
     // READING .tped DATA:
     std::ifstream entrada;
@@ -321,30 +449,35 @@ void readFile_tped(std::string fichinput1,char (&population)[MAXIND][MAXLOCI], P
         std::cerr << "Could not open \"" << fichinput1 << "\". Does the file exist?" << std::endl;
         exit(EXIT_FAILURE);
     }
-    flagmapfile=false;
-    ncromos=0;
-    int contalines=0;
-    popInfo.numLoci=0;
-    while (std::getline(entrada,line)){
-        longi=int(line.length());
-        if (longi<12){
-            std::cerr << "Line too short in tped file" << std::endl;
+    flag_chr = false;
+    ncromos = 0;
+    int contalines = 0;
+    popInfo.numLoci = 0;
+    while (std::getline(entrada, line))
+    {
+        ++nline;
+        longi = int(line.length());
+        if (longi < 12)
+        {
+            std::cerr << "Line "<<nline<<" too short in tped file" << std::endl;
             exit(EXIT_FAILURE);
         }
-        conta=0;
-        posi=0;
+        conta = 0;
+        posi = 0;
         // chr name
-        posi2=posi;
-        posi=int(line.find_first_of(" \t",posi2));
-        if (posi < 0) {
-            std::cerr << "Line too short in tped file" << std::endl;
+        posi2 = posi;
+        posi = int(line.find_first_of(" \t", posi2));
+        if (posi < 0)
+        {
+            std::cerr << "Line "<<nline<<" too short in tped file" << std::endl;
             exit(EXIT_FAILURE);
         }
         cromocod = line.substr(0, posi);
-        if (cromocod != cromocodback){
+        if (cromocod != cromocodback)
+        {
             cromocodback = cromocod;
             rangocromo[ncromos] = contalines;
-            ++ ncromos;
+            ++ncromos;
         }
         cromo[contalines] = ncromos;
 
@@ -353,28 +486,77 @@ void readFile_tped(std::string fichinput1,char (&population)[MAXIND][MAXLOCI], P
         ++posi;
         ++conta;
 
-        while ((posi < longi) && (conta < 4)){
-            posi2=posi;
-            posi=int(line.find_first_of(" \t",posi2));
-            if (posi < 0) {
-                std::cerr << "Line too short in tped file" << std::endl;
+        // Ignora las primeras columnas
+        while ((posi < longi) && (conta < 2))
+        {
+            posi2 = posi;
+            posi = int(line.find_first_of(" \t", posi2));
+            if (posi < 0)
+            {
+                std::cerr << "Line "<<nline<<" too short in tped file" << std::endl;
                 exit(EXIT_FAILURE);
-           }
+            }
             ++posi;
             ++conta;
         }
-        if (conta==4){
+
+        // Position in morgans or centimorgans
+        posi2 = posi;
+        posi = static_cast<int>(line.find_first_of(" \t", posi2));
+        posiCM[popInfo.numLoci] =  std::stod(line.substr(posi2, posi-posi2));
+        if (posiCM[popInfo.numLoci]>0){flag_cM=true;}
+        ++posi;
+        ++conta;
+        // Base-pair coordinate
+        posi2 = posi;
+        posi = static_cast<int>(line.find_first_of(" \t", posi2));
+        posiBP[popInfo.numLoci] = std::stoi(line.substr(posi2, posi-posi2));
+        if (posiBP[popInfo.numLoci]>0){flag_Mb=true;}
+        ++posi;
+        ++conta;
+        if (conta == 4)
+        {
             popInfo.numIndividuals = 0;
-            while(posi < longi) { // asigna genot.
-                base1[0]=line.at(posi);
-                posi2=posi;
-                posi=int(line.find_first_of(" \t",posi2));
-                if (posi < 0) {break;}
+            while (posi < longi)
+            { // asigna genot.
+                base1[0] = line.at(posi);
+                posi2 = posi;
+                posi = int(line.find_first_of(" \t", posi2));
+                if (posi < 0)
+                {
+                    break;
+                }
                 ++posi;
-                base2[0]=line.at(posi);
-                if ((base1[0]!='0') && (base2[0]!='0')){
-                    if (base[popInfo.numLoci] == '\0'){
+                base2[0] = line.at(posi);
+                rightletter = true;
+                str_base = base1[0];
+                if (str_plink.find(str_base) == str_plink.npos)
+                {
+                    rightletter = false;
+                }
+                str_base = base2[0];
+                if (str_plink.find(str_base) == str_plink.npos)
+                {
+                    rightletter = false;
+                }
+                if (!rightletter)
+                {
+                    std::cerr << "Wrong allele in line " << nline << " of tped file (maybe also in other lines). Only bases A, G, C, T and N (case-insensitive) and numbers from 0 to 9 are allowed." << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                if ((base1[0] != '0') && (base2[0] != '0') && (base1[0] != 'N') && (base2[0] != 'N') && (base1[0] != 'n') && (base2[0] != 'n'))
+                {
+                    if (base[popInfo.numLoci] == '\0')
+                    {
                         base[popInfo.numLoci] = base1[0];
+                    }
+                    if (base1[0] != base[popInfo.numLoci])
+                    {
+                        base1[0] = 'X';
+                    }
+                    if (base2[0] != base[popInfo.numLoci])
+                    {
+                        base2[0] = 'X';
                     }
 
                     // 0:homo ref, 1:het, 2:homo noref
@@ -394,73 +576,108 @@ void readFile_tped(std::string fichinput1,char (&population)[MAXIND][MAXLOCI], P
                         population[popInfo.numIndividuals][popInfo.numLoci] = 1;
                     }
                 }
-                else{
-                    population[popInfo.numIndividuals][popInfo.numLoci] = 9;// '9' = Genotipo sin asignar
+                else
+                {
+                    population[popInfo.numIndividuals][popInfo.numLoci] = 9; // '9' = Genotipo sin asignar
                 }
-                posi2=posi;
-                posi=int(line.find_first_of(" \t",posi2));
-                if (posi < 0) {posi=longi;}
+                posi2 = posi;
+                posi = int(line.find_first_of(" \t", posi2));
+                if (posi < 0)
+                {
+                    posi = longi;
+                }
                 ++posi;
                 popInfo.numIndividuals++;
-                if (popInfo.numIndividuals > MAXIND){
-                    std::cerr << "Reached limit of sample size (" << MAXIND <<")" << std::endl;
+                if (popInfo.numIndividuals > MAXIND)
+                {
+                    std::cerr << "Reached limit of sample size (" << MAXIND << ")" << std::endl;
                     exit(EXIT_FAILURE);
                 }
-
             }
 
-            if (popInfo.numLoci == 0){
+            if (popInfo.numLoci == 0)
+            {
                 contaIndBase = popInfo.numIndividuals;
             }
 
-            if (popInfo.numIndividuals != contaIndBase){
+            if (popInfo.numIndividuals != contaIndBase)
+            {
                 std::cerr << "Some SNP in the sample are not represented in all the individuals" << std::endl;
                 exit(EXIT_FAILURE);
             }
 
             ++popInfo.numLoci;
-            if (popInfo.numLoci >= MAXLOCI) {
-                std::cerr<<"Reached max number of loci (" << MAXLOCI << ")" << std::endl;
+            if (popInfo.numLoci >= MAXLOCI)
+            {
+                std::cerr << "Reached max number of loci (" << MAXLOCI << ")" << std::endl;
                 exit(EXIT_FAILURE);
             }
+        }
+    }
+    if (ncromos > 1)
+    {
+        flag_chr = true;
+    }
 
+    if (flag_cM){
+        Mtot = 0;
+        for (int conta = 0; conta < ncromos; ++conta) {
+            Mtot += posiCM[rangocromo[conta+1]-1]-posiCM[rangocromo[conta]];
         }
+        Mtot /= 100.0;       // en Morgans
     }
-    if (ncromos>1){
-        flagmapfile=true;
+
+    if (flag_Mb){
+        Mbtot = 0;
+        for (int conta = 0; conta < ncromos; ++conta) {
+            Mbtot += posiBP[rangocromo[conta+1]-1]-posiBP[rangocromo[conta]];
+        }
+        Mbtot /= 1000000.0;  // en megabases
+                
     }
-    if (flagmapfile){
+        
+
+//    genomesize = Ncrom * params.Mchr;
+    if (flag_chr)
+    {
         popInfo.numcromo = ncromos;
-        // posicMacu += posicM-posicMant;
-        unomenoschrprop=0;
-        for (i=0;i<ncromos;++i){
-            chrnum[i]=rangocromo[i+1]-rangocromo[i]; // número de marcadores en cada cromosoma
-            chrprop[i]=chrnum[i]/contalines; // Proporción de SNPs en cada cromosoma
-            chrprop[i]*=chrprop[i]; //ahora su cuadrado
-            unomenoschrprop+=chrprop[i];
+        unomenoschrprop = 0;
+        if(!flag_Gs){genomesize=Mtot;}
+        for (i = 0; i < ncromos; ++i)
+        {
+            chrnum[i] = rangocromo[i + 1] - rangocromo[i]; // número de marcadores en cada cromosoma
+            chrprop[i] = chrnum[i] / contalines;           // Proporción de SNPs en cada cromosoma
+            if (flag_Gs){
+                chrsize[i] = chrprop[i] * genomesize; // tamaño en Morgans
+            }
+            else if (flag_cM){
+                chrsize[i] = (posiCM[rangocromo[i+1]-1]-posiCM[rangocromo[i]])/100; // tamaño en Morgans
+            }
+            unomenoschrprop += chrprop[i];
         }
-        unomenoschrprop=1-unomenoschrprop;
+        unomenoschrprop = 1 - unomenoschrprop;
     }
 
     entrada.close();
 }
 
-
-
-void readFile_vcf(std::string fichinput1, char (&population)[MAXIND][MAXLOCI], PopulationInfo (&popInfo)) 
+void readFile_vcf(std::string fichinput1, char (&population)[MAXIND][MAXLOCI], PopulationInfo(&popInfo))
 {
     /*
      * Takes as input the file name and a pointer to the population
      * matrix and returns the number of individuals in the file
      */
-	char base1[1],base2[1];
-    int contaIndBase = 0;
-    int conta=0, posi=0, posi2=0, longi=0,i;
+    char base1[1], base2[1];
+    int contaIndBase = 0, nline = 0;
+    int conta = 0, posi = 0, posi2 = 0, longi = 0, i, j;
     std::string line;
     std::string cromocod;
     std::string cromocodback = "laksjhbqne";
+    std::string str_vcf = "AGCT,agct";
+    std::string str_base = "";
+    bool rightletter, hayalelos;
 
-    // READING .tped DATA:
+    // READING .vcf DATA:
     std::ifstream entrada;
     entrada.open(fichinput1, std::ios::in); // Bucle de lectura del fichero tped
     if (!entrada.good())
@@ -468,64 +685,194 @@ void readFile_vcf(std::string fichinput1, char (&population)[MAXIND][MAXLOCI], P
         std::cerr << "Could not open \"" << fichinput1 << "\". Does the file exist?" << std::endl;
         exit(EXIT_FAILURE);
     }
-    flagmapfile=false;
-    ncromos=0;
-    int contalines=0;
-    popInfo.numLoci=0;
-    while (std::getline(entrada,line)){
-        if (line.at(0) != '#'){
-            longi=int(line.length());
-            if (longi<12){
-                std::cerr << "Line too short in tped file" << std::endl;
+    flag_chr = false;
+    ncromos = 0;
+    int contalines = 0;
+    popInfo.numLoci = 0;
+    while (std::getline(entrada, line))
+    {
+        ++nline;
+        if (line.at(0) != '#')
+        {
+            longi = int(line.length());
+            if (longi < 12)
+            {
+                std::cerr << "Line "<<nline<<" too short in vcf file" << std::endl;
                 exit(EXIT_FAILURE);
             }
-            conta=0;
-            posi=0;
+            conta = 0;
+            posi = 0;
             // chr name
-            posi2=posi;
-            posi=int(line.find_first_of("\t",posi2));
-            if (posi < 0) {
-                std::cerr << "Line too short in tped file" << std::endl;
+            posi2 = posi;
+            posi = int(line.find_first_of("\t", posi2));
+            if (posi < 0)
+            {
+                std::cerr << "Line "<<nline<<" too short in vcf file" << std::endl;
                 exit(EXIT_FAILURE);
             }
             cromocod = line.substr(0, posi);
-            if (cromocod != cromocodback){
-                cromocodback = cromocod;
-                rangocromo[ncromos] = contalines;
-                ++ ncromos;
-            }
-            cromo[contalines] = ncromos;
-
-            ++contalines; // para crom
 
             ++posi;
             ++conta;
 
-            while ((posi < longi) && (conta < 9)){
-                posi2=posi;
-                posi=int(line.find_first_of("\t",posi2));
-                if (posi < 0) {
-                    std::cerr << "Line too short in tped file" << std::endl;
+
+            posi2 = posi;
+            posi = static_cast<int>(line.find_first_of("\t", posi2));
+            if (posi < 0) {
+                std::cerr << "Line too short in vcf file" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            posiBP[popInfo.numLoci] = std::stoi(line.substr(posi2, posi-posi2));
+            if (posiBP[popInfo.numLoci]>0){flag_Mb=true;}
+            ++posi;
+            ++conta;
+
+            while ((posi < longi) && (conta < 3))
+            {
+                posi2 = posi;
+                posi = int(line.find_first_of("\t", posi2));
+                if (posi < 0)
+                {
+                    std::cerr << "Line "<<nline<<" too short in vcf file" << std::endl;
                     exit(EXIT_FAILURE);
                 }
                 ++posi;
                 ++conta;
             }
-            if (conta==9){
+
+            // Mira el alelo REF
+            posi2 = posi;
+            posi = int(line.find_first_of("\t", posi2));
+            j = posi - posi2;
+            rightletter = true;
+            hayalelos = true;
+            for (i = 0; i < j; ++i)
+            {
+                str_base = line.substr(posi2 + i, 1);
+                if (str_base == ".")
+                {
+                    hayalelos = false;
+                }
+                else if (str_vcf.find(str_base) == str_vcf.npos)
+                {
+                    rightletter = false;
+                    break;
+                }
+            }
+            if (!rightletter)
+            {
+                std::cerr << "Wrong reference allele in line " << nline << " of vcf file (maybe also in other lines). Only bases A, G, C and T (case-insensitive) are allowed." << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            ++posi;
+            ++conta;
+
+            // Mira el alelo ALT
+            posi2 = posi;
+            posi = int(line.find_first_of("\t", posi2));
+            j = posi - posi2;
+            for (i = 0; i < j; ++i)
+            {
+                str_base = line.substr(posi2 + i, 1);
+                if (str_base == ".")
+                {
+                    hayalelos = false;
+                }
+                else if (str_vcf.find(str_base) == str_vcf.npos)
+                {
+                    rightletter = false;
+                    break;
+                }
+            }
+        
+            if (!rightletter)
+            {
+                std::cerr << "Wrong alternative allele in line " << nline << " of vcf file. Only bases A, G, C and T (case-insensitive) are allowed." << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            ++posi;
+            ++conta;
+
+            while ((posi < longi) && (conta < 8))
+            {
+                posi2 = posi;
+                posi = int(line.find_first_of("\t", posi2));
+                if (posi < 0)
+                {
+                    std::cerr << "Line "<<nline<<" too short in vcf file" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                ++posi;
+                ++conta;
+            }
+
+            // Mira si la posicion 8 es GT (genotipo)
+            haygenotipos = false;
+            if (line.substr(posi, 2) == "GT")
+            {
+                haygenotipos = true;
+            }
+
+            // Lee los  genotipos:
+            if (haygenotipos && hayalelos)
+            {
+                // contabiliza el cromosoma que habia leido al principio de la linea
+                if (cromocod != cromocodback)
+                {
+                    cromocodback = cromocod;
+                    rangocromo[ncromos] = contalines;
+                    ++ncromos;
+                }
+                cromo[contalines] = ncromos;
+                ++contalines; // para crom
+                // Avanza hasta el primer genotipo:
+                posi2 = posi;
+                posi = int(line.find_first_of("\t", posi2));
+                if (posi < 0)
+                {
+                    std::cerr << "Line too short in tped file" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                ++posi;
+                ++conta;
+                // empieza a leer genotipos
                 popInfo.numIndividuals = 0;
-                while(posi < longi) { // asigna genot.
-                    base1[0]=line.at(posi);
-                    posi2=posi;
-                    posi=int(line.find_first_of("/|",posi2));
-                    if (posi < 0) {break;}
+                while (posi < longi)
+                { // asigna genot.
+                    base1[0] = line.at(posi);
+                    posi2 = posi;
+                    posi = int(line.find_first_of("/|", posi2));
+                    if (posi < 0)
+                    {
+                        break;
+                    }
                     ++posi;
-                    base2[0]=line.at(posi);
-                    if ((base1[0]!='.') && (base2[0]!='.')){
-                        if (base[popInfo.numLoci] == '\0'){
-                            base[popInfo.numLoci] = base1[0];
+                    base2[0] = line.at(posi);
+                    if ((base1[0] != '.') && (base2[0] != '.'))
+                    {
+                        if (base[popInfo.numLoci] == '\0')
+                        {
+                            // base[popInfo.numLoci] = '0'; // el de referencia es '0'
+                            base[popInfo.numLoci] = base1[0]; // el de referencia es '0'
+                        }
+                        // if (base1[0] != '0')
+                        // {
+                        //     base1[0] = '1';
+                        // }
+                        // if (base2[0] != '0')
+                        // {
+                        //     base2[0] = '1';
+                        // }
+                       if (base1[0] != base[popInfo.numLoci])
+                        {
+                            base1[0] = 'X';
+                        }
+                        if (base2[0] != base[popInfo.numLoci])
+                        {
+                            base2[0] = 'X';
                         }
 
-                        // 0:homo ref, 1:het, 2:homo noref
+                       // 0:homo ref, 1:het, 2:homo noref
                         if (base1[0] == base2[0])
                         {
                             if (base1[0] == base[popInfo.numLoci])
@@ -542,62 +889,84 @@ void readFile_vcf(std::string fichinput1, char (&population)[MAXIND][MAXLOCI], P
                             population[popInfo.numIndividuals][popInfo.numLoci] = 1;
                         }
                     }
-                    else{
-                        population[popInfo.numIndividuals][popInfo.numLoci] = 9;// '9' = Genotipo sin asignar
+                    else
+                    {
+                        population[popInfo.numIndividuals][popInfo.numLoci] = 9; // '9' = Genotipo sin asignar
                     }
-                    posi2=posi;
-                    posi=int(line.find_first_of("\t",posi2));
-                    if (posi < 0) {posi=longi;}
+                    posi2 = posi;
+                    posi = int(line.find_first_of("\t", posi2));
+                    if (posi < 0)
+                    {
+                        posi = longi;
+                    }
                     ++posi;
 
                     popInfo.numIndividuals++;
-                    if (popInfo.numIndividuals > MAXIND){
-                        std::cerr << "Reached limit of sample size (" << MAXIND <<")" << std::endl;
+                    if (popInfo.numIndividuals > MAXIND)
+                    {
+                        std::cerr << "Reached limit of sample size (" << MAXIND << ")" << std::endl;
                         exit(EXIT_FAILURE);
                     }
-
                 }
 
-                if (popInfo.numLoci == 0){
+                if (popInfo.numLoci == 0)
+                {
                     contaIndBase = popInfo.numIndividuals;
                 }
 
-                if (popInfo.numIndividuals != contaIndBase){
+                if (popInfo.numIndividuals != contaIndBase)
+                {
                     std::cerr << "Some SNP in the sample are not represented in all the individuals" << std::endl;
                     exit(EXIT_FAILURE);
                 }
 
                 ++popInfo.numLoci;
-                if (popInfo.numLoci >= MAXLOCI) {
-                    std::cerr<<"Reached max number of loci (" << MAXLOCI << ")" << std::endl;
+                if (popInfo.numLoci >= MAXLOCI)
+                {
+                    std::cerr << "Reached max number of loci (" << MAXLOCI << ")" << std::endl;
                     exit(EXIT_FAILURE);
                 }
-
             }
         }
     }
-    if (ncromos>1){
-        flagmapfile=true;
+    if (ncromos > 1)
+    {
+        flag_chr = true;
     }
-    if (flagmapfile){
-        popInfo.numcromo = ncromos;
-        // posicMacu += posicM-posicMant;
-        unomenoschrprop=0;
-        for (i=0;i<ncromos;++i){
-            chrnum[i]=rangocromo[i+1]-rangocromo[i]; // número de marcadores en cada cromosoma
-            chrprop[i]=chrnum[i]/contalines; // Proporción de SNPs en cada cromosoma
-            chrprop[i]*=chrprop[i]; //ahora su cuadrado
-            unomenoschrprop+=chrprop[i];
+//    genomesize = Ncrom * params.Mchr;
+    if (flag_Mb){
+        Mbtot = 0;
+        for (int conta = 0; conta < ncromos; ++conta) {
+            Mbtot += posiBP[rangocromo[conta+1]-1]-posiBP[rangocromo[conta]];
         }
-        unomenoschrprop=1-unomenoschrprop;
+        Mbtot /= 1000000.0;  // en megabases
+        
+        
+    }
+
+
+    if (flag_chr)
+    {
+        popInfo.numcromo = ncromos;
+        if(!flag_Gs){genomesize=Mtot;}
+        unomenoschrprop = 0;
+        for (i = 0; i < ncromos; ++i)
+        {
+            chrnum[i] = rangocromo[i + 1] - rangocromo[i]; // número de marcadores en cada cromosoma
+            chrprop[i] = chrnum[i] / contalines;           // Proporción de SNPs en cada cromosoma
+            if (flag_Gs){
+                chrsize[i] = chrprop[i] * genomesize; // tamaño en Morgans
+            }
+            else if (flag_cM){
+                chrsize[i] = (posiCM[rangocromo[i+1]-1]-posiCM[rangocromo[i]])/100; // tamaño en Morgans
+            }
+            unomenoschrprop += chrprop[i];
+        }
+        unomenoschrprop = 1 - unomenoschrprop;
     }
 
     entrada.close();
-
 }
-
-
-
 
 
 void printHelp(char * appName) 
@@ -673,11 +1042,12 @@ void printHelp(char * appName)
 }
 
 int main(int argc, char * argv[]) {
-    int i, j, j2,j3, conta;
+    int i, j, k, j2,j3, conta;
     int containdX,contalocX;
     double a,b,sx2,sx3;
     double nDT[5]={-1.645,-0.6745,0,0.6745,1.645};
     bool superadolimite;
+    double aculnc = 0, nlnc = 0, unidades, acusize;
 
     std::random_device rd;
     std::mt19937 g(rd());
@@ -753,9 +1123,7 @@ int main(int argc, char * argv[]) {
                     std::cerr << "Number of chromosomes is 0" << std::endl;
                     return -1;
                 }
-                else{
-                    flaggenomesize=true;
-                }
+                flag_Gs=true;
             }
             else{
                 std::cerr << "Number of chromosomes not specified" << std::endl;
@@ -791,6 +1159,7 @@ int main(int argc, char * argv[]) {
             std::cerr << "Missing data filename" << std::endl;
             return -1;             
     }
+    genomesize = Ncrom * params.Mchr;
     if ((extension!="vcf") && (extension!="ped") && (extension!="tped")){
             std::cerr << "Missing data filename extension. It must be vcf, ped or tped" << std::endl;
             return -1;             
@@ -841,7 +1210,7 @@ int main(int argc, char * argv[]) {
 
     double tProcessFile = (omp_get_wtime() - tini);
     if (!params.quiet){
-        if ((flagmapfile) && (extension=="ped")){
+        if ((flag_chr) && (extension=="ped")){
             std::cout << " Reading " << fichinput1  << " and "<< fichinput2 << " took " << std::fixed << std::setprecision(2) << tProcessFile << " sec" << std::endl;
         }
         else{
@@ -911,6 +1280,8 @@ int main(int argc, char * argv[]) {
     pj=prefloc;
     frecmed=0;
     nfrecmed=0;
+    int mincontaindX = int(float(eneind) * 2.0 * (1 - params.miss)); // se admite por defecto un 20% de missing data (params.miss)
+    double nindmedfs = 0;
     for (j=0;j<popInfo.numLoci;++j){
         frec[*pj]=0;
         segrega[*pj]=false;
@@ -925,8 +1296,12 @@ int main(int argc, char * argv[]) {
                 ++(++containdX);}
             ++pk;
         }
-        if (containdX>0){
-            if ((frec[*pj]>0) && (frec[*pj]<containdX)){++contaseg;segrega[*pj]=true;} // contador de segregantes
+        if (containdX>mincontaindX){
+            if ((frec[*pj]>0) && (frec[*pj]<containdX)){
+                ++contaseg;
+                nindmedfs += containdX;
+                segrega[*pj]=true;
+            } // contador de segregantes
             frec[*pj]/=(containdX);
             homo[*pj]/=(containdX/2);
             b=frec[*pj];
@@ -938,58 +1313,111 @@ int main(int argc, char * argv[]) {
         if (contaseg>=eneloc){break;}
     }
 
+    nindmedfs /= 2* contaseg;
     frecmed/=nfrecmed;
     if (eneind>popInfo.numIndividuals){eneind=popInfo.numIndividuals;}
     if (eneloc>contaseg){eneloc=contaseg;}
 
+    //Calculo de f sample y control del exceso del límite de loci:
+    superadolimite=false;
+    acupq=0;
+    acuPp2=0;
+    pj=prefloc;
+    conta=0;
+    for (j2=0;j2<eneloc;++j2){
+        for(;;){
+            if (segrega[*pj]){
+                acuPp2 += (homo[*pj] - frec[*pj] * frec[*pj]);
+                acupq  += (frec[*pj] * (1.0 - frec[*pj]));
+                ++pj;
+                ++conta;
+                break;}
+            else{
+                ++pj;
+                if(pj > pfinloc){
+                    superadolimite=true;
+                    break;
+                }
+            }
+        }
+        if (superadolimite){break;}
+    }
+    eneloc = conta; // Loci segregantes en la muestra
+    fs = acuPp2/acupq;
+    Het_esp = acupq/eneloc;
+    increMorgans = 0.0001;
 
-    // // En primer lugar busca hermanos completos usando METODO ANTERIOR
-    // // SIN ALEATORIZAR:
-    // std::cout<<"HERMANOS METODO ANTERIOR:\n";
-    // nparhermanos=0;
-    // npadrehijo=0;
-    // for (i=0;i<popInfo.numIndividuals-1;++i){
-    //     for (j=i+1;j<popInfo.numIndividuals;++j){
-    //         counthethet=0;
-    //         counthethomo=0;
-    //         countnopadre=0;
-    //         for (j2=0;j2<popInfo.numLoci;++j2){
-    //             sumahethomo=indi[i][j2]+indi[j][j2];
-    //             if ((sumahethomo==1) || (sumahethomo==3)){ // HetHomo
-    //                 ++counthethomo;
-    //             }
-    //             else if (sumahethomo==2){
-    //                 if (indi[i][j2]==indi[j][j2]){
-    //                     ++counthethet;
-    //                 }
-    //                 else{
-    //                     ++countnopadre;
-    //                 }
-    //             }
-    //         }
-    //         if (counthethet>20){ // primero mira a ver si hay heterocigotos suficientes para hacer las pruebas
-    //             rationopadre=float(countnopadre)/(float(counthethet));                
-    //             if (rationopadre<0.005){ // Es una pareja padre-hijo (error de genotipado del 0.005)
-    //                 padrehijo[0][npadrehijo]=i;
-    //                 padrehijo[1][npadrehijo]=j;
-    //                 ++npadrehijo;
-    //             }
-    //             else { // si no es una pareja padre-hijo
-    //                 ratiohets=(float(counthethet)+float(counthethomo)*0.5);
-    //                 if (ratiohets>0){
-    //                     ratiohets=float(counthethet)/ratiohets;
-    //                 }
-    //                 if (ratiohets>0.5){ // mira a ver si son hermanos completos
-    //                     hermanos[0][nparhermanos]=i;
-    //                     hermanos[1][nparhermanos]=j;
-    //                     ++nparhermanos;
-    //                     std::cout<<i+1<<" ,"<<j+1<<"\n";
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    // DISTRIBUTION OF MAP DISTANCES BETWEEN MARKERS ACROSS CHROMOSOMES
+    if (flag_chr){
+        maxdistance=0;
+        maxdistanceindx=0;
+        sumadist=0;
+        if (flag_Gs){
+            for (i = 0; i < ncromos; ++i){
+                if (maxdistance<chrsize[i]){
+                    maxdistance=chrsize[i];
+                }
+                acusize = chrsize[i];
+                j=int(acusize/increMorgans);
+                if (maxdistanceindx<j){
+                    maxdistanceindx=j;
+                }
+                k=1;
+                while ((j>=0)){
+                    mapdist[j]+=k;
+                    sumadist+=k;
+                    ++k;
+                    --j;
+                }
+            }
+        }
+        else if(flag_cM){
+            int d=0;
+            increMorgans*=100;
+            for (i = 0; i < ncromos; ++i){
+                for (j=rangocromo[i];j<rangocromo[i+1]-1;++j){
+                    for (k = j+1; k < rangocromo[i+1]; ++k){
+                        d=int(abs(posiCM[k]-posiCM[j])/increMorgans); // distancia en cM*0.01
+                        if (d>maxdistanceindx){maxdistanceindx=d;}
+                        ++mapdist[d];
+                        ++sumadist;
+                    }
+                }
+                maxdistance = std::max(float(maxdistanceindx)*increMorgans/100.0,maxdistance);
+            }
+            increMorgans/=100;
+        }
 
+        for (j = 0; j <maxdistanceindx; ++j){
+            mapdist[j]/=sumadist;
+        }
+    }
+    else{
+        sumadist=0;
+        // maxdistance = float(Ncrom)/float(ncromos);
+        maxdistance = 1;
+        maxdistanceindx=int(maxdistance/increMorgans);
+        // j=int(((float(eneloc)/Ncrom)/2.0)/increMorgans);
+        j=0;
+        k=1;
+        while ((j<maxdistanceindx)){
+            mapdist[j]+=k;
+            sumadist+=k;
+            ++k;
+            ++j;
+        }
+        for (j = 0; j <maxdistanceindx; ++j){
+            mapdist[j]/=sumadist;
+        }
+    }
+    //    std::cout << cmed << std::endl;
+    if (maxdistance>10){
+            std::cerr << "Chromosome sizes are limited to a maximum of 1000 cM. There is at least" << std::endl;
+            std::cerr << "one chromosome larger than this limit." << std::endl;
+            return -1;
+    }
+
+    fp = (1.0 + fs * (2 * nindmedfs - 1.0)) / (2 * nindmedfs - 1.0 + fs);
     // En primer lugar busca hermanos completos usando toda la información disponible
     // SIN ALEATORIZAR:
     a=4/(6-frecmed*(1-frecmed)) - 0.028;
@@ -1041,34 +1469,6 @@ int main(int argc, char * argv[]) {
             }
         }
     }
-
-    //Calculo de f sample y control del exceso del límite de loci:
-    superadolimite=false;
-    acupq=0;
-    acuPp2=0;
-    pj=prefloc;
-    conta=0;
-    for (j2=0;j2<eneloc;++j2){
-        for(;;){
-            if (segrega[*pj]){
-                acuPp2 += (homo[*pj] - frec[*pj] * frec[*pj]);
-                acupq  += (frec[*pj] * (1.0 - frec[*pj]));
-                ++pj;
-                ++conta;
-                break;}
-            else{
-                ++pj;
-                if(pj > pfinloc){
-                    superadolimite=true;
-                    break;
-                }
-            }
-        }
-        if (superadolimite){break;}
-    }
-    eneloc = conta; // Loci segregantes en la muestra
-    fs = acuPp2/acupq;
-    Het_esp = acupq/eneloc;
 
     // Distribucion de heterocigosidades de los individuos (ver Medidas_de_Parent_y_Het.docx)
     pk = prefind;
@@ -1166,9 +1566,9 @@ int main(int argc, char * argv[]) {
 
 
     // Calculo de D2:
-  params.progress.InitCurrentTask(eneloc-1);
-  params.progress.SetCurrentTask(0, "Measuring d²");
-  params.progress.SaveProgress();
+    params.progress.InitCurrentTask(eneloc-1);
+    params.progress.SetCurrentTask(0, "Measuring d²");
+    params.progress.SaveProgress();
     acuD2=acuW=acur2=acun=0;
     acuD205=acuW05=acur205=acun05=0;
     pj=prefloc;
@@ -1184,15 +1584,18 @@ int main(int argc, char * argv[]) {
     
     for (j2=0;j2<eneloc-1;++j2){
         ppj = &valid_idx[j2];
-       #pragma omp parallel for private(tacuHoHo,distancia,id,tacuHoHetHetHo,tacuHetHet,ppk,ppi,D,W,r2,ss,_containdX)
+       #pragma omp parallel for private(tacui, tacuj,tacuHoHo,distancia,id,tacuHoHetHetHo,tacuHetHet,ppk,ppi,D,W,r2,ss,_containdX)
         for (j3=j2+1;j3<eneloc;++j3){
             ppi = &valid_idx[j3];
             tacuHoHo=tacuHoHetHetHo=tacuHetHet=0; //acumuladores de genotipos
+            tacui = tacuj = 0;
             ppk=prefind;
-			_containdX=0;
+            _containdX=0;
             for (int _i=0;_i<eneind;++_i){
                 ss=indi[*ppk][*ppj]+indi[*ppk][*ppi];
                if (ss<9){
+                    tacui += indi[*ppk][*ppi];
+                    tacuj += indi[*ppk][*ppj];
                     ++_containdX;
                     if (ss<2){ }
                     else if (ss==2){
@@ -1202,24 +1605,46 @@ int main(int argc, char * argv[]) {
                 ++ppk;
             }
             if (_containdX>0){
-                W  = frec[*ppj] * frec[*ppi];
-                D  = -2 * W + (2 * tacuHoHo + tacuHoHetHetHo + tacuHetHet / 2) / _containdX;
+                tacui /= (_containdX * 2);
+                tacuj /= (_containdX * 2);
+                //W  = frec[*ppj] * frec[*ppi];
+                W = tacui * tacuj;
+                D = -2 * W + (2 * tacuHoHo + tacuHoHetHetHo + tacuHetHet / 2) / _containdX;
                 D *= D;
-                W *= (1-frec[*ppj]) * (1-frec[*ppi]);
-                if (flagmapfile){
+                //W *= (1-frec[*ppj]) * (1-frec[*ppi]);
+                W *= (1 - tacui) * (1 - tacuj);
+                if (flag_chr){
                     if ((cromo[*ppi] != cromo[*ppj])){
                         ++ x_contapares05[j3];
                         x_containdX05[j3] += _containdX;
                         xD05[j3]  += D;
                         xW05[j3]  += W;
-                        xr205[j3] += D / W; 
+                        // xr205[j3] += D / W;  <<<<<XXXXXXX
+                    } else {
+                        if (flag_cM){
+                            distancia=fabs(posiCM[*ppi] - posiCM[*ppj]);
+                            if (distancia>params.z){
+                                ++x_contapareslink[j3];
+                                x_containdXlink[j3] += _containdX;
+                                xDlink[j3] += D;
+                                xWlink[j3] += W;
+                                // xr2link[j3] += D / W; <<<<<XXXXXXX
+                            }
+                        }
+                        else{
+                            ++x_contapareslink[j3];
+                            x_containdXlink[j3] += _containdX;
+                            xDlink[j3] += D;
+                            xWlink[j3] += W;
+                            // xr2link[j3] += D / W; <<<<<XXXXXXX
+                        }
                     }
                 }
                 ++ x_contapares[j3];
                 x_containdX[j3] += _containdX;
                 xD[j3]  += D;
                 xW[j3]  += W;
-                xr2[j3] += D / W; 
+                // xr2[j3] += D / W; <<<<<XXXXXXX
              }
         }
       if (j2 % 1000 == 0) {
@@ -1232,36 +1657,70 @@ int main(int argc, char * argv[]) {
         effndata+=x_containdX[j3];
         acuD2+=xD[j3];
         acuW+=xW[j3];
-        acur2+=xr2[j3];
+        // acur2+=xr2[j3]; <<<<<XXXXXXX
     }
-    if (flagmapfile){
-        for (j3=0;j3<eneloc;++j3){
-            acun05+=x_contapares05[j3];
-            effndata05+=x_containdX05[j3];
-            acuD205+=xD05[j3];
-            acuW05+=xW05[j3];
-            acur205+=xr205[j3];
+    if (flag_chr)
+    {
+        for (j3 = 0; j3 < eneloc; ++j3)
+        {
+            acun05 += x_contapares05[j3];
+            effndata05 += x_containdX05[j3];
+            acuD205 += xD05[j3];
+            acuW05 += xW05[j3];
+            // acur205 += xr205[j3]; <<<<<XXXXXXX
         }
+        for (j3 = 0; j3 < eneloc; ++j3)
+        {
+            acunlink += x_contapareslink[j3];
+            effndatalink += x_containdXlink[j3];
+            acuD2link += xDlink[j3];
+            acuWlink += xWlink[j3];
+            // acur2link += xr2link[j3]; <<<<<XXXXXXX
+        }
+        acun = acun05 + acunlink;
+        effndata = effndata05 + effndatalink;
+        d2s = (acuD205 + acuD2link) / (acuW05 + acuWlink);
+        acuD2 = (acuD205 + acuD2link) / acun;
+        acuW = (acuW05 + acuWlink) / acun;
+        // acur2 = (acur205 + acur2link) / acun; <<<<<XXXXXXX
+
         d2s05 = acuD205 / acuW05;
         acuD205 /= acun05;
         acuW05 /= acun05;
-        acur205 /= acun05;
+        // acur205 /= acun05; <<<<<XXXXXXX
+
+        d2slink = acuD2link / acuWlink;
+        acuD2link /= acunlink;
+        acuWlink /= acunlink;
+        // acur2link /= acunlink; <<<<<XXXXXXX
     }
-    d2s    = acuD2 / acuW;
-    acuD2 /= acun;
-    acuW  /= acun;
-    acur2 /= acun;
+    else
+    {
+        for (j3 = 0; j3 < eneloc; ++j3)
+        {
+            acun += x_contapares[j3];
+            effndata += x_containdX[j3];
+            acuD2 += xD[j3];
+            acuW += xW[j3];
+            // acur2 += xr2[j3]; <<<<<XXXXXXX
+        }
+        d2s = acuD2 / acuW;
+        acuD2 /= acun;
+        acuW /= acun;
+        // acur2 /= acun; <<<<<XXXXXXX
+    }
+
     obsndata = double(eneind) * (double(eneloc) * (double(eneloc) - 1.0)) / 2.0;
 
-    propmiss = 1.0 - effndata / obsndata;
+    // propmiss = 1.0 - effndata / obsndata; <<<<<XXXXXXX
     n_SNP_pairs = (double(eneloc)*double(eneloc-1))/2.0;
     effeneind = effndata/acun;
+    propmiss = 1.0 - effeneind / eneind;
 
-    fp = (1.0 + fs * (2.0 * effeneind - 1.0)) / (2.0 * effeneind - 1.0 + fs);
+    //fp = (1.0 + fs * (2.0 * effeneind - 1.0)) / (2.0 * effeneind - 1.0 + fs);
     if (std::abs(fp)>0.08){flagnoestimaks=true;}
     tpas = (omp_get_wtime() - tini);
 
-    genomesize = Ncrom * params.Mchr;
    
     if (params.flagnok){
         if (flagnoestimaks){
@@ -1281,7 +1740,7 @@ int main(int argc, char * argv[]) {
     salida << "#\n";
     salida << "# INPUT PARAMETERS:\n";
     salida << "# Number of chromosomes in .map file:\n";
-    if (flagmapfile){
+    if (flag_chr){
         salida << std::fixed << std::setprecision(0);
         salida << ncromos<<"\n";
     }
@@ -1339,14 +1798,14 @@ int main(int argc, char * argv[]) {
     salida << fp<<"\n";
     salida << "# Observed d^2 of the sample (weighted correlation of loci pairs):\n";
     salida << d2s<<"\n";
-    salida << "# Observed r^2 of the sample (Pearson correlation of loci pairs):\n";
-    salida << acur2<<"\n";
+    // salida << "# Observed r^2 of the sample (Pearson correlation of loci pairs):\n";
+    //salida << acur2<<"\n"; <<<<<XXXXXXX
     d2_pob=(d2s-(4*double(effeneind)-4)/((2*double(effeneind)-1)*(2*double(effeneind)-1)))/((1-1/(2*double(effeneind)))*0.25); //APROXIMADO
-    if (flagmapfile){
+    if (flag_chr){
         salida << "# Observed d^2 of the sample (only between different cromosomes):\n";
         salida << d2s05<<"\n";
-        salida << "# Observed r^2 of the sample (only between different cromosomes):\n";
-        salida << acur205<<"\n";
+        // salida << "# Observed r^2 of the sample (only between different cromosomes):\n";
+        // salida << acur205<<"\n"; <<<<<XXXXXXX
     }
     salida << "# Expected heterozygosity of individuals in the sample under H-W eq.:\n";
     salida << 2 * Het_esp<<"\n";
@@ -1429,7 +1888,7 @@ int main(int argc, char * argv[]) {
         }
 
         f_pob=fp;
-        if (flagmapfile){
+        if (flag_chr){
             effeneind_h=effeneind*2;
             double samx=(effeneind_h-2.0)*(effeneind_h-2.0)*(effeneind_h-2.0);
             samx+=8.0/5.0*(effeneind_h-2.0)*(effeneind_h-2.0);
@@ -1557,7 +2016,7 @@ int main(int argc, char * argv[]) {
     }
     else
     {
-        if (flagmapfile){
+        if (flag_chr){
             std::cout << std::fixed << std::setprecision(2) << rangos_int[2] << std::endl;
             if (d2p05>0){
                 std::cout << std::endl;
@@ -1568,7 +2027,7 @@ int main(int argc, char * argv[]) {
             std::cout << std::fixed << std::setprecision(2) << rangos_int[2] << std::endl;
         }
         if (params.verbose){
-            if (flagmapfile){
+            if (flag_chr){
                 std::cout << std::fixed << std::setprecision(2) << rangos_int[1] << std::endl;
                 std::cout << std::fixed << std::setprecision(2) << rangos_int[3] << std::endl;
                 std::cout << std::fixed << std::setprecision(2) << rangos_int[0] << std::endl;
@@ -1597,130 +2056,224 @@ int main(int argc, char * argv[]) {
 //  SOLO ENTRE CROMOSOMAS DISTINTOS:
 //  Se calcula cuando hay un fichero .map que tenga al menos la asignación de cada
 //  marcador a su cromosoma. No hacen falta que tenga las posiciones físicas o genéticas.
-void Ecuacion05(){
-    int MIL,DOSMIL,i,ii,j,k,conta;
-    double sample_size,sample_size_h,samplex,sampley;
-    double d2spred, increL,ele,increNe,sumad2spred,sumafrec,c,c2,c12;
-    double fp12,K12;
-    bool flagbreak=false;
+void Ecuacion05()
+{
+    int MIL, DOSMIL, i, ii, conta;
+    double sample_size, sample_size_h, samplex, sampley;
+    double d2spred, increNe;
+    double fp12, K12;
+    bool flagbreak = false;
 
-    K12=(1.0+params.K/4.0);
-    MIL=1000;
-    DOSMIL=2000;
-    fp12=(1+fp)*(1+fp);
-    sample_size=effeneind;
-    sample_size_h=sample_size*2;
-    samplex=(sample_size_h-2.0)*(sample_size_h-2.0)*(sample_size_h-2.0);
-    samplex+=8.0/5.0*(sample_size_h-2.0)*(sample_size_h-2.0);
-    samplex+=4*(sample_size_h-2.0);
-    samplex/=((sample_size_h-1.0)*(sample_size_h-1.0)*(sample_size_h-1.0)+(sample_size_h-1.0)*(sample_size_h-1.0));
-    sampley=(2.0*sample_size_h-4.0)/((sample_size_h-1.0)*(sample_size_h-1.0));
-    Ne=1000;
-    for (ii=0;ii<2;++ii){
-        increNe=Ne/(4*(ii+1));
-        for (i=0;i<10;++i){
-            for(conta=0;conta<DOSMIL;++conta){
-                d2p05=(1+0.25*K12+1/Ne)/(Ne*1.5+0.55);
-                d2spred=(d2p05*0.25*samplex + ((params.K/2+2*0.25*K12)/(4*Ne))*samplex + sampley)*fp12;
-                if (d2spred>d2s05){
-                    if (increNe<0){
-                        increNe=-increNe/5;
-                        break;}}
-                if (d2spred<d2s05){
-                    if (increNe>0){
-                        increNe=-increNe/5;
-                        break;}}
-                if ((Ne+increNe)<4){
-                    increNe=increNe/5;
-                    break;}
-                else{
-                    Ne+=increNe;}
-                if (abs(increNe)<0.1){break;}
-                if (Ne>1000000000){flagbreak=true;}
-                if (flagbreak){break;}
+    K12 = (1.0 + params.K / 4.0);
+    MIL = 1000;
+    DOSMIL = 2000;
+    fp12 = (1 + fp) * (1 + fp);
+    sample_size = effeneind;
+    sample_size_h = sample_size * 2;
+    samplex = (sample_size_h - 2.0) * (sample_size_h - 2.0) * (sample_size_h - 2.0);
+    samplex += 8.0 / 5.0 * (sample_size_h - 2.0) * (sample_size_h - 2.0);
+    samplex += 4 * (sample_size_h - 2.0);
+    samplex /= ((sample_size_h - 1.0) * (sample_size_h - 1.0) * (sample_size_h - 1.0) + (sample_size_h - 1.0) * (sample_size_h - 1.0));
+    sampley = (2.0 * sample_size_h - 4.0) / ((sample_size_h - 1.0) * (sample_size_h - 1.0));
+    Ne = 1000;
+    for (ii = 0; ii < 2; ++ii)
+    {
+        increNe = Ne / (4 * (ii + 1));
+        for (i = 0; i < 20; ++i)
+        {
+            for (conta = 0; conta < DOSMIL; ++conta)
+            {
+                d2p05 = (1 + 0.25 * K12 + 1 / Ne) / (Ne * 1.5 + 0.55);
+                d2spred = (d2p05 * 0.25 * samplex + ((params.K / 2 + 2 * 0.25 * K12) / (4 * Ne)) * samplex + sampley) * fp12;
+                if (d2spred > d2s05)
+                {
+                    if (increNe < 0)
+                    {
+                        increNe = -increNe / 5;
+                        break;
+                    }
+                }
+                if (d2spred < d2s05)
+                {
+                    if (increNe > 0)
+                    {
+                        increNe = -increNe / 5;
+                        break;
+                    }
+                }
+                if ((Ne + increNe) < 3)
+                {
+                    increNe = increNe / 5;
+                    break;
+                }
+                else
+                {
+                    Ne += increNe;
+                }
+                if (abs(increNe) < 0.01)
+                {
+                    break;
+                }
+                if (Ne > 100000000)
+                {
+                    flagbreak = true;
+                    break;
+                }
+                // if (flagbreak){
+                //     break;
+                // }
             }
-            if (abs(increNe)<0.1){break;}
-            if (flagbreak){break;}
+            if (abs(increNe) < 0.1)
+            {
+                break;
+            }
+            if (flagbreak)
+            {
+                break;
+            }
         }
-        if (flagbreak){break;}
+        if (flagbreak)
+        {
+            break;
+        }
     }
+
 }
 
 //  DENTRO Y ENTRE CROMOSOMAS IGUALES:
 //  Si en el comando se da el tamaño del genoma en Morgans entonces 
 //  no se considera el .map exista o nó.
 //  Se asume que cada cromosoma es de un morgan aproximadamente.
-void IntegralCromIGUALES(){ 
-    int MIL,DOSMIL,i,ii,j,k,conta;
-    double sample_size,sample_size_h,samplex,sampley;
-    double d2spred, increL,increNe,sumad2spred,sumafrec,c,c2,c12;
-    double distancia,fp12, tamacrom,distmin,K12,fc2;
-    bool flagbreak=false;
+void IntegralCromIGUALES()
+{
 
-    K12=(1.0+params.K/4.0);
-    tamacrom=genomesize/float(ncrom_sample_int);
-    distmin=genomesize/eneloc;
-    if (distmin>(tamacrom)){distmin=tamacrom;}
-    MIL=int(1.0/distmin);
-    // if (MIL<1000){MIL*=2;}
-    // MIL=int(float(MIL)*tamacrom);
-    if (MIL<100){MIL=100;}
-    fp12=(1+fp)*(1+fp);
-    DOSMIL=2000;
-    sample_size=effeneind;
-    sample_size_h=sample_size*2;
-    samplex=(sample_size_h-2.0)*(sample_size_h-2.0)*(sample_size_h-2.0);
-    samplex+=8.0/5.0*(sample_size_h-2.0)*(sample_size_h-2.0);
-    samplex+=4*(sample_size_h-2.0);
-    samplex/=((sample_size_h-1.0)*(sample_size_h-1.0)*(sample_size_h-1.0)+(sample_size_h-1.0)*(sample_size_h-1.0));
-    sampley=(2.0*sample_size_h-4.0)/((sample_size_h-1.0)*(sample_size_h-1.0));
-    Ne=1000;
-    for (ii=0;ii<2;++ii){
-        increNe=Ne/(4*(ii+1));
-        for (i=0;i<10;++i){
-            for(conta=0;conta<DOSMIL;++conta){
-                increL=tamacrom/MIL;
-                sumad2spred=0;
-                distancia=tamacrom;
-                sumafrec=0;
-                j=0;
-                while (distancia>distmin){
-                    c=(1-exp(-2*distancia))/2;
-                    c2=c*c;
-                    c12=(1-c)*(1-c);
-                    d2p=(1+c2*K12+1/Ne)/(2*Ne*(1-c12)+2.2*c12);
+    int MIL, DOSMIL, i, ii, j, minj, k, conta;
+    double sample_size, sample_size_h, samplex, sampley;
+    double d2spred, increL, increNe, sumad2spred, sumafrec;
+    double fp12, tamacrom, distmin, K12;
+    bool flagbreak = false;
+
+    K12 = (1.0 + params.K / 4.0);
+    tamacrom = genomesize / float(ncrom_sample_int);
+    // distmin = genomesize / eneloc;
+    // if (distmin > (tamacrom))
+    // {
+    //     distmin = tamacrom;
+    // }
+    // MIL = int(1.0 / distmin);
+    // // if (MIL<1000){MIL*=2;}
+    // // MIL=int(float(MIL)*tamacrom);
+    // if (MIL < 100)
+    // {
+    //     MIL = 100;
+    // }
+
+    increL=increMorgans;
+    if (flag_z){
+        distmin=increL/2 + params.z/100; // en Morgans
+        minj=int(distmin/increMorgans);
+    }
+    else{
+        distmin=increL/2;
+        minj=0;
+    }
+    fp12 = (1 + fp) * (1 + fp);
+    DOSMIL = 2000;
+    sample_size = effeneind;
+    sample_size_h = sample_size * 2;
+    samplex = (sample_size_h - 2.0) * (sample_size_h - 2.0) * (sample_size_h - 2.0);
+    samplex += 8.0 / 5.0 * (sample_size_h - 2.0) * (sample_size_h - 2.0);
+    samplex += 4 * (sample_size_h - 2.0);
+    samplex /= ((sample_size_h - 1.0) * (sample_size_h - 1.0) * (sample_size_h - 1.0) + (sample_size_h - 1.0) * (sample_size_h - 1.0));
+    sampley = (2.0 * sample_size_h - 4.0) / ((sample_size_h - 1.0) * (sample_size_h - 1.0));
+    Ne = 1000;
+    for (ii = 0; ii < 2; ++ii)
+    {
+        increNe = Ne / (4 * (ii + 1));
+        for (i = 0; i < 10; ++i)
+        {
+            for (conta = 0; conta < DOSMIL; ++conta)
+            {
+                // increL = tamacrom / MIL;
+                sumad2spred = 0;
+                distancia = distmin;
+                sumafrec = 0;
+                j = minj;
+                while (distancia < maxdistance)
+                {
+                    c = (1 - exp(-2 * distancia)) / 2;
+                    c2 = c * c;
+                    c12 = (1 - c) * (1 - c);
+                    d2p = (1 + c2 * K12 + 1 / Ne) / (2 * Ne * (1 - c12) + 2.2 * c12);
+                    sumad2spred += mapdist[j] * (d2p * c12 * samplex + ((params.K / 2 + 2 * c2 * K12) / (4 * Ne)) * samplex + sampley) * fp12; // La integral
+                    distancia += increL;
+                    sumafrec += mapdist[j];
                     ++j;
-                    sumad2spred+=(j) * (d2p*c12*samplex + ((params.K/2+2*c2*K12)/(4*Ne))*samplex + sampley)*fp12; // La integral
-                    distancia-=increL;
-                    sumafrec+=j;
                 }
-                d2p=(1+0.25*K12+1/Ne)/(Ne*1.5+0.55);
-                d2spred=(d2p*0.25*samplex + ((params.K/2+2*0.25*K12)/(4*Ne))*samplex + sampley)*fp12;
-                if (sumafrec>0){
-                    d2spred=float(ncrom_sample_int-1)/float(ncrom_sample_int)*d2spred;
-                    d2spred+=(sumad2spred/sumafrec)/ncrom_sample_int; 
+                d2p = (1 + 0.25 * K12 + 1 / Ne) / (Ne * 1.5 + 0.55);
+                d2spred = (d2p * 0.25 * samplex + ((params.K / 2 + 2 * 0.25 * K12) / (4 * Ne)) * samplex + sampley) * fp12;
+                if (sumafrec > 0)
+                {
+                    if (flag_chr){
+                        d2spred = float(acun05) / float(acun05+acunlink) * d2spred;
+                        d2spred += (sumad2spred / sumafrec) * float(acunlink) / float(acun05+acunlink);
+                    }
+                    else{
+                        d2spred = (Ncrom-1)/Ncrom * d2spred;
+                        d2spred += (sumad2spred / sumafrec) / Ncrom;
+                    }
                 }
-                if (d2spred>d2s){
-                    if (increNe<0){
-                        increNe=-increNe/5;
-                        break;}}
-                if (d2spred<d2s){
-                    if (increNe>0){
-                        increNe=-increNe/5;
-                        break;}}
-                if ((Ne+increNe)<4){
-                    increNe=increNe/5;
-                    break;}
-                else{
-                    Ne+=increNe;}
-                if (abs(increNe)<0.1){break;}
-                if (Ne>1000000000){flagbreak=true;}
-                if (flagbreak){break;}
+                if (d2spred > d2s)
+                {
+                    if (increNe < 0)
+                    {
+                        increNe = -increNe / 5;
+                        break;
+                    }
+                }
+                if (d2spred < d2s)
+                {
+                    if (increNe > 0)
+                    {
+                        increNe = -increNe / 5;
+                        break;
+                    }
+                }
+                if ((Ne + increNe) < 3)
+                {
+                    increNe = increNe / 5;
+                    break;
+                }
+                else
+                {
+                    Ne += increNe;
+                }
+                if (abs(increNe) < 0.1)
+                {
+                    break;
+                }
+                if (Ne > 100000000)
+                {
+                    flagbreak = true;
+                    break;
+                }
+                // if (flagbreak){
+                //     break;
+                // }
             }
-            if (abs(increNe)<0.1){break;}
-            if (flagbreak){break;}
+            if (abs(increNe) < 0.1)
+            {
+                break;
+            }
+            if (flagbreak)
+            {
+                break;
+            }
         }
-        if (flagbreak){break;}
+        if (flagbreak)
+        {
+            break;
+        }
     }
 }
 
@@ -1787,3 +2340,4 @@ double CalculaIntervalo_soloLD(){
     }
     return log10_Nest;
 }
+
