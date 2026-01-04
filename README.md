@@ -93,3 +93,13 @@ EXAMPLES:
          ./currentNe -k -0.2 filename 20
      (NOTE the MINUS SIGN before the number of full sibling 0.2)
 ```
+
+
+# FUNDING
+
+This work is part of I+D+i project PID2020-114426GB-C21 financed by MICIU/AEI /10.13039/501100011033 (Agencia Estatal de Investigación, Ministerio de Ciencia, Innovación y Universidades, Spain).
+
+```
+
+
+
